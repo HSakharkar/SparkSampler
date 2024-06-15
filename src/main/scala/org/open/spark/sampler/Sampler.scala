@@ -1,5 +1,4 @@
-/*
- * Copyright 2024 Hemant Sakharkar
+/* Copyright 2024 Hemant Sakharkar
 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +17,19 @@ package org.open.spark.sampler
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.Partition
+import org.apache.spark.internal.Logging
 
 import scala.collection.mutable
 
-case class Sampler private(@transient private var sc: SparkContext = null, rdd: RDD[_] = null, sampleSize: Int = 0, funcKey: (Any) => String = { t => t.toString }) {
+/**
+ * Sampler builder pattern to customize Sampler to extract the exact samples.
+ * @param sc Spark context
+ * @param rdd raw RDD
+ * @param sampleSize sample size
+ * @param contributionMap contributions
+ * @param funcKey functions
+ */
+case class Sampler private(@transient private var sc: SparkContext = null, rdd: RDD[_] = null, sampleSize: Int = 0, contributionMap: Map[String, Double] = Map.empty[String,Double], funcKey: (Any) => String = { t => t.toString }) extends Logging {
   def ofRDD(rdd: RDD[_]): Sampler = {
     copy(rdd = rdd)
   }
@@ -37,6 +45,10 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
 
   def customKeys(f: (Any) => String): Sampler = {
     copy(funcKey = f)
+  }
+
+  def contributions(weights: Map[String, Double]): Sampler ={
+    copy(contributionMap = weights)
   }
 
   def apply(): Sampler = {
@@ -75,7 +87,7 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
     existPartitions
   }
 
-  private def extractRequiredRecord(sampleRDD : RDD[_], partitionCombineStats: Array[(String, PartitionStats)], perKeySample: Double): RDD[_] ={
+  private def extractRequiredRecord(sampleRDD : RDD[_], partitionCombineStats: Array[(String, PartitionStats)], contributionWeights: Map[String,Double]): RDD[_] ={
 
     val sampleRecordRDD = sampleRDD.mapPartitionsWithIndex((inx, r) => {
       var w = mutable.HashMap[String, Double]()
@@ -96,6 +108,8 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
         w
       })
 
+      println(w)
+
       var keyCount: mutable.HashMap[String, Int] = new mutable.HashMap[String, Int]()
 
       val sampleRecords = r.filter(rec => {
@@ -104,10 +118,10 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
           keyCount.put(key, keyCount.getOrElse(key, 0) + 1)
         }
 
-        w.contains(key) && keyCount(key) <= perKeySample * w(key)
+        w.contains(key) && keyCount(key) <= contributionWeights(key) * w(key) * sampleSize
       })
 
-      sampleRecords.iterator
+      sampleRecords.seq
     })
 
     sampleRecordRDD
@@ -119,10 +133,25 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
     val stats = calculateStatsOfRDD(rdd)
 
     val keyList = stats.flatMap(t => t._2.keys).collect().distinct
-    println(keyList.mkString(","))
+    log.info("keyList:"+keyList.length)
 
-    val perKeySample = sampleSize * 1.0 / keyList.size
-    val ratioMap = stats.map(t => (t._1, t._2.map(r => (r._1, r._2 * 1.0 / perKeySample))))
+    require(keyList.length <= sampleSize, "Dataset uniques are more than the samples size please increase the samples as keysize:"+keyList.length)
+    val sliceSize = if (keyList.length > 5) 5 else keyList.length
+    println(keyList.slice(0,sliceSize).mkString(","))
+
+    val perKeySample = sampleSize * 1.0 / keyList.length
+    log.info("perKeySample:"+perKeySample)
+
+
+    println(keyList.mkString(","))
+    val contributionWeights:Map[String, Double] = if(contributionMap.isEmpty){
+          keyList.map( k => (k, 1.0/keyList.length)).toMap
+    }else{
+          contributionMap
+    }
+
+    println(contributionWeights)
+    val ratioMap = stats.map(t => (t._1, t._2.filter( r => contributionWeights.contains(r._1)).map(r => (r._1, (r._2 * 1.0) / (contributionWeights(r._1) * sampleSize)))))
     val sortedRatioMap = ratioMap.sortBy(f => -1 * f._2.size)
 
     val partitionStatsRDD = sortedRatioMap.flatMap(f => {
@@ -135,14 +164,17 @@ case class Sampler private(@transient private var sc: SparkContext = null, rdd: 
 
     }).collect()
 
+    log.info(ratioMap.collect().toList.mkString)
+    partitionCombineStats.foreach(t => log.info(t._2+","))
+
     val partitionList = partitionCombineStats.flatMap(t => t._2.partition).distinct
 
     val existPartitions = assignPartition(rdd.partitions, partitionList)
 
     println(existPartitions.map(p => p.index).toList)
 
-    val sampleRDD = new SubsetRDD(sc, rdd.dependencies, rdd, existPartitions)
-    val sampleRecordRDD = extractRequiredRecord(sampleRDD, partitionCombineStats, perKeySample)
+    val sampleRDD = new SubsetRDD(sc, rdd, existPartitions)
+    val sampleRecordRDD = extractRequiredRecord(sampleRDD, partitionCombineStats, contributionWeights)
 
     sampleRecordRDD.cache()
     sampleRecordRDD

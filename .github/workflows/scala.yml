@@ -3,16 +3,17 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Scala CI
+name: Spark Sampler CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build:
@@ -27,10 +28,26 @@ jobs:
         java-version: '8'
         distribution: 'temurin'
         cache: 'sbt'
-    - name: Run tests
-      run: sbt test
-      # Optional: This step uploads information to the GitHub dependency graph and unblocking Dependabot alerts for the repository
+
+    - name: Run Compile
+      run: sbt compile
+      env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          
+  # Optional: This step uploads information to the GitHub dependency graph and unblocking Dependabot alerts for the repository
   #  - name: Upload dependency graph
   #    uses: scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91
-    - name: packaging
+    - name: Packaging
       run: sbt package
+      env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          
+    - name: Sampler jar Assembly
+      run: sbt assembly
+      env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      
+    - name: Publish to github package
+      run: sbt publish
+      env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}

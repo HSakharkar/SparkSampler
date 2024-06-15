@@ -19,12 +19,18 @@ package org.open.spark.sampler
 import scala.reflect.ClassTag
 import org.apache.spark.{Dependency, Partition, SparkContext, TaskContext}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.Row
 
-import scala.collection.mutable
+import scala.collection.immutable.Seq
 
+/**
+ * Creates Subset RDD class from raw RDD which refer a subset from raw rdd to extract samples.
+ * @param sc spark Context
+ * @param rdd raw RDD
+ * @param subsetPartitions subset partitions
+ * @param classTag$T$0 class tag for type of RDD
+ * @tparam T
+ */
 class SubsetRDD[T: ClassTag](@transient private var sc: SparkContext,
-                             @transient private var deps: Seq[Dependency[_]],
                              rdd: RDD[T],
                              subsetPartitions: Array[Partition]
                             ) extends RDD[T](sc, Nil) {
@@ -35,9 +41,16 @@ class SubsetRDD[T: ClassTag](@transient private var sc: SparkContext,
     rdd.compute(spPartition.prev(), context)
   }
 
+  override protected def getDependencies: Seq[Dependency[_]] = rdd.dependencies.toList.seq
+
   override protected def getPartitions: Array[Partition] = subsetPartitions
 }
 
+/**
+ * Create a subset partition to refer a partition from a raw RDD.
+ * @param prev prev or a raw rdd partition
+ * @param partitionId subset RDD provided partition
+ */
 private class SubsetPartition(prev:Partition, partitionId: Int) extends Partition {
 
   override def index: Int = {

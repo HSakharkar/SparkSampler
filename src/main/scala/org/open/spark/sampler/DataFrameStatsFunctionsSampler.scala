@@ -15,36 +15,54 @@
  */
 package org.open.spark.sampler
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.catalyst.trees.CurrentOrigin
 import org.apache.spark.sql.{Column, DataFrame, DataFrameStatFunctions, Row, SparkSession}
-import org.apache.spark.{Dependency, Partition, SparkContext, TaskContext}
-import org.apache.spark.sql.catalyst.trees.CurrentOrigin
 
-class DataFrameStatsFunctionsSampler (df: DataFrame)(implicit  sc: SparkSession){
+/**
+ * class to add DataFrame Functions for creating a samples from Spark Dataframe
+ */
+class DataFrameStatsFunctionsSampler (df: DataFrame)(implicit  spark_session: SparkSession) extends Logging{
 
+  /**
+   * Gets a representative samples from spark dataframe for a column based on given sample size
+   * @param col Column to be used
+   * @param sampleSize sample size required from a dataframe
+   * @param contributions contribution Map which provide percentage required in a required samples
+   * @return
+   */
   def sampleBy(col: Column, sampleSize: Int): DataFrame =  {
     sampleBy(col.toString(), sampleSize)
   }
 
-  def sampleBy(col: String, sampleSize: Int): DataFrame =  {
+  /**
+   * Gets a representative samples from spark dataframe for a column based on given sample size
+   * @param col String column name
+   * @param sampleSize sample size required from a dataframe
+   * @param contributions contribution Map which provide percentage required in a required samples
+   * @return
+   */
+  def sampleBy(col: String, sampleSize:Int, contributions:Map[String, Double]=Map.empty[String,Double]): DataFrame = {
 
-    val sampleRdd = Sampler.apply().ofRDD(df.rdd).sparkContext(sc.sparkContext).customKeys((t) => {
+    val sampleRdd = Sampler().ofRDD(df.rdd).sparkContext(spark_session.sparkContext).customKeys((t) => {
 
       val r = t.asInstanceOf[Row]
       r.getString(r.fieldIndex(col))
 
-    }).sampleSize(sampleSize).createSample()
+    }).sampleSize(sampleSize).contributions(contributions).createSample()
 
     val sampleRDDRow = sampleRdd.asInstanceOf[RDD[Row]]
-    val sampleDf = sc.createDataFrame(sampleRDDRow, df.schema)
+    val sampleDf = spark_session.createDataFrame(sampleRDDRow, df.schema)
     sampleDf
-
   }
 
 }
 
+/**
+ *
+ * Sample Converter to add implicit functions to Dataframe class
+ */
 object SamplerConverter {
-  implicit def asDF(df : DataFrame)(implicit sc: SparkSession) =
+  implicit def asDF(df : DataFrame)(implicit spark_session: SparkSession) =
     new DataFrameStatsFunctionsSampler(df)
 }
