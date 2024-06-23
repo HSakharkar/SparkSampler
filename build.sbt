@@ -1,7 +1,7 @@
 import sbt.nio.file.PathFilter
 import sbtassembly.Assembly.{Library, Project}
 import sbtassembly.AssemblyPlugin
-ThisBuild / version := "1.0.0-SNAPSHOT"
+ThisBuild / version := "1.0.0"
 
 ThisBuild / scalaVersion := "2.12.18"
 
