@@ -2,7 +2,7 @@ import sbt.nio.file.PathFilter
 import sbtassembly.Assembly.{Library, Project}
 import sbtassembly.AssemblyPlugin
 ThisBuild / version := "1.0.0"
-
+ThisBuild / organization := "io.github.hsakharkar"
 ThisBuild / scalaVersion := "2.12.18"
 
 publishMavenStyle := true
